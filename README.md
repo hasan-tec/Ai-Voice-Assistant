@@ -37,7 +37,7 @@ export function Altair() {
 
   useEffect(() => {
     setConfig({
-      model: "models/gemini-v3-s-test",
+      model: "models/gemini-2.0-flash-exp",
       systemInstruction: {
         parts: [
           {
@@ -50,7 +50,7 @@ export function Altair() {
   }, [setConfig]);
 
   useEffect(() => {
-    client.on("toolcall", (toolCall) => {
+    const onToolCall = (toolCall: ToolCall) => {
       console.log(`got toolcall`, toolCall);
       const fc = toolCall.functionCalls.find(
         (fc) => fc.name === declaration.name
@@ -59,7 +59,11 @@ export function Altair() {
         const str = (fc.args as any).json_graph;
         setJSONString(str);
       }
-    });
+    };
+    client.on("toolcall", onToolCall);
+    return () => {
+        client.off("toolcall", onToolCall);
+    };
   }, [client]);
 
   const embedRef = useRef<HTMLDivElement>(null);
