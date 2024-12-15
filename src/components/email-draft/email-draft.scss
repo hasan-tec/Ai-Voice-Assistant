@@ -1,0 +1,28 @@
+.email-draft {
+    background: var(--Neutral-5);
+    padding: 20px;
+    border-radius: 8px;
+    min-width: 300px;
+  
+    h3 {
+      margin-bottom: 16px;
+      color: var(--Neutral-90);
+    }
+  
+    textarea {
+      width: 100%;
+      background: var(--Neutral-10);
+      border: 1px solid var(--Neutral-20);
+      border-radius: 4px;
+      padding: 8px;
+      color: var(--Neutral-90);
+      font-family: inherit;
+      resize: vertical;
+  
+      &::placeholder {
+        color: var(--Neutral-50);
+      }
+    }
+  }
+  
+  
