@@ -1,3 +1,13 @@
+
+
+import React, { useState, useEffect } from 'react';
+import { useLiveAPIContext } from '../../contexts/LiveAPIContext';
+import { useGoogleAuth } from '../../contexts/GoogleAuthContext';
+import './email-draft.scss';
+import { FunctionDeclaration, SchemaType } from "@google/generative-ai";
+
+
+
 // Declare global types for Gmail API
 declare global {
   interface Window {
@@ -58,12 +68,6 @@ declare global {
     };
   }
 }
-
-import React, { useState, useEffect } from 'react';
-import { useLiveAPIContext } from '../../contexts/LiveAPIContext';
-import { useGoogleAuth } from '../../contexts/GoogleAuthContext';
-import './email-draft.scss';
-import { FunctionDeclaration, SchemaType } from "@google/generative-ai";
 
 const emailDraftDeclaration: FunctionDeclaration = {
   name: "draft_email",

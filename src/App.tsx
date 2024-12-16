@@ -31,7 +31,7 @@ const App: React.FC = () => {
             <SidePanel />
             <main>
                {/* Add GoogleSignInButton to the top of the main section */}
-               <div className="flex justify-end p-2">
+               <div className="google-sign-in">
                 <GoogleSignInButton />
               </div>
               <div className="view-toggle">

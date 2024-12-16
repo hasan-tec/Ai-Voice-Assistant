@@ -136,20 +136,30 @@ function CalendarComponent() {
   const createEvent = async (eventDetails: EventArgs) => {
     try {
       setLoading(true);
+       // Explicitly set timezone to 'Asia/Karachi'
+       const timezone = 'Asia/Karachi';
       const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const startDate = new Date(eventDetails.startDateTime);
-      const endDate = new Date(eventDetails.endDateTime);
+       // Parse the dates while preserving the intended local time
+       const startDate = new Date(eventDetails.startDateTime);
+       const endDate = new Date(eventDetails.endDateTime);
+
+
+        // Format dates in RFC3339 with the correct timezone
+      const formatToRFC3339 = (date: Date) => {
+        const pad = (n: number) => n < 10 ? `0${n}` : `${n}`;
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}+05:00`;
+      };
 
       const event = {
         summary: eventDetails.summary,
         description: eventDetails.description,
         start: {
-          dateTime: startDate.toISOString(),
-          timeZone: userTimeZone,
+          dateTime: formatToRFC3339(startDate),
+          timeZone: timezone,
         },
         end: {
-          dateTime: endDate.toISOString(),
-          timeZone: userTimeZone,
+          dateTime: formatToRFC3339(endDate),
+          timeZone: timezone,
         },
         ...(eventDetails.isVirtual === true && {
           conferenceData: {
