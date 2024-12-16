@@ -1,33 +1,69 @@
-import React, { useState, useEffect } from 'react';
-import { useLiveAPIContext } from '../../contexts/LiveAPIContext';
-import './email-draft.scss';
-import { FunctionDeclaration, SchemaType } from "@google/generative-ai";
-
+// Declare global types for Gmail API
 declare global {
   interface Window {
-    google: any;
     gapi: {
+      load: (name: string, options: {
+        callback?: () => void;
+        onerror?: (error: Error) => void;
+      }) => void;
       client: {
-        load: (api: string, version: string) => Promise<void>;
-        init: (config: any) => Promise<void>;
-        getToken: () => any;
+        init: (config: { apiKey?: string }) => Promise<void>;
+        load: (serviceName: string, version: string) => Promise<void>;
         gmail: {
           users: {
             drafts: {
-              list: (params: { userId: string; maxResults: number }) => Promise<any>;
-              get: (params: { userId: string; id: string; format: string }) => Promise<any>;
-              create: (params: { userId: string; resource: any }) => Promise<any>;
+              list: (params: { 
+                userId: string; 
+                maxResults?: number 
+              }) => Promise<{
+                result: {
+                  drafts?: Array<{ id: string }>;
+                }
+              }>;
+              get: (params: { 
+                userId: string; 
+                id: string; 
+                format?: string 
+              }) => Promise<{
+                result: {
+                  id: string;
+                  message?: {
+                    payload?: {
+                      headers?: Array<{ name: string; value: string }>;
+                    };
+                  };
+                }
+              }>;
+              create: (params: { 
+                userId: string; 
+                resource: { 
+                  message: { 
+                    raw: string 
+                  } 
+                } 
+              }) => Promise<any>;
             };
             messages: {
-              send: (params: { userId: string; resource: any }) => Promise<any>;
+              send: (params: { 
+                userId: string; 
+                resource: { 
+                  raw: string 
+                } 
+              }) => Promise<any>;
             };
           };
         };
+        calendar?: any; // Keep existing calendar type if needed
       };
-      load: (api: string, callback: () => void) => void;
     };
   }
 }
+
+import React, { useState, useEffect } from 'react';
+import { useLiveAPIContext } from '../../contexts/LiveAPIContext';
+import { useGoogleAuth } from '../../contexts/GoogleAuthContext';
+import './email-draft.scss';
+import { FunctionDeclaration, SchemaType } from "@google/generative-ai";
 
 const emailDraftDeclaration: FunctionDeclaration = {
   name: "draft_email",
@@ -63,94 +99,60 @@ interface EmailDraftArgs {
   send?: boolean;
 }
 
+interface GmailDraft {
+  id: string;
+  message?: {
+    payload?: {
+      headers?: Array<{ name: string; value: string }>;
+    };
+  };
+}
+
 export function EmailDraft() {
-  const [isSignedIn, setIsSignedIn] = useState(false);
+  const { isSignedIn } = useGoogleAuth();
   const [error, setError] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<any[]>([]);
+  const [drafts, setDrafts] = useState<GmailDraft[]>([]);
   const { client, setConfig } = useLiveAPIContext();
-  const [tokenClient, setTokenClient] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    document.body.appendChild(script);
+    const initAPI = async () => {
+      try {
+        if (!window.gapi?.client) {
+          await new Promise<void>((resolve, reject) => {
+            window.gapi.load('client', {
+              callback: () => resolve(),
+              onerror: (err) => reject(err)
+            });
+          });
 
-    script.onload = () => {
-      loadGapiScript();
-    };
-  }, []);
+          await window.gapi.client.init({
+            apiKey: process.env.REACT_APP_GOOGLE_API_KEY,
+          });
+        }
 
-  const loadGapiScript = () => {
-    const script = document.createElement('script');
-    script.src = 'https://apis.google.com/js/api.js';
-    script.onload = () => {
-      initializeGapiClient();
-    };
-    document.body.appendChild(script);
-  };
-
-  const initializeGapiClient = async () => {
-    try {
-      await new Promise((resolve, reject) => {
-        window.gapi.load('client', { callback: resolve, onerror: reject });
-      });
-
-      await window.gapi.client.init({
-        apiKey: process.env.REACT_APP_GOOGLE_API_KEY,
-      });
-      
-      // Load the Gmail API client library explicitly
-      await window.gapi.client.load('gmail', 'v1');
-
-      setTokenClient(
-        window.google.accounts.oauth2.initTokenClient({
-          client_id: process.env.REACT_APP_GOOGLE_CLIENT_ID,
-          scope: 'https://www.googleapis.com/auth/gmail.compose',
-          callback: '', // defined later
-        })
-      );
-    } catch (err) {
-      setError('Error initializing Gmail API');
-      console.error('Error initializing GAPI client:', err);
-    }
-  };
-
-  const handleAuthClick = () => {
-    if (!tokenClient) {
-      setError('Authentication client not initialized');
-      return;
-    }
-
-    tokenClient.callback = async (resp: any) => {
-      if (resp.error) {
-        setError(resp.error);
-        return;
+        // Load Gmail API
+        await window.gapi.client.load('gmail', 'v1');
+        await listDrafts();
+      } catch (err: unknown) {
+        console.error('Error initializing API:', err);
+        setError('Error initializing Gmail API');
       }
-      setIsSignedIn(true);
-      await listDrafts();
     };
 
-    if (window.gapi.client.getToken() === null) {
-      tokenClient.requestAccessToken({ prompt: 'consent' });
-    } else {
-      tokenClient.requestAccessToken({ prompt: '' });
+    if (isSignedIn) {
+      initAPI();
     }
-  };
-
-  const handleSignoutClick = () => {
-    const token = window.gapi.client.getToken();
-    if (token !== null) {
-      window.google.accounts.oauth2.revoke(token.access_token);
-      window.gapi.client.setToken(null);
-      setIsSignedIn(false);
-      setDrafts([]);
-    }
-  };
+  }, [isSignedIn]);
 
   const listDrafts = async () => {
     try {
+      setLoading(true);
+
+      if (!window.gapi?.client?.gmail) {
+        throw new Error('Gmail API not initialized');
+      }
+
       const response = await window.gapi.client.gmail.users.drafts.list({
         userId: 'me',
         maxResults: 10
@@ -158,7 +160,7 @@ export function EmailDraft() {
       
       const draftsData = response.result.drafts || [];
       const detailedDrafts = await Promise.all(
-        draftsData.map(async (draft: any) => {
+        draftsData.map(async (draft: { id: string }) => {
           const detailedResponse = await window.gapi.client.gmail.users.drafts.get({
             userId: 'me',
             id: draft.id,
@@ -169,14 +171,22 @@ export function EmailDraft() {
       );
       
       setDrafts(detailedDrafts);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error fetching drafts:', err);
       setError('Error fetching email drafts');
+    } finally {
+      setLoading(false);
     }
   };
 
   const createDraft = async (emailDetails: EmailDraftArgs) => {
     try {
+      setLoading(true);
+
+      if (!window.gapi?.client?.gmail) {
+        throw new Error('Gmail API not initialized');
+      }
+
       const email = [
         `To: ${emailDetails.to}`,
         `Subject: ${emailDetails.subject}`,
@@ -208,9 +218,11 @@ export function EmailDraft() {
 
       await listDrafts();
       return true;
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error creating draft:', err);
       throw err;
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -249,7 +261,7 @@ export function EmailDraft() {
               id: fc.id,
             })),
           });
-        } catch (err) {
+        } catch (err: unknown) {
           client.sendToolResponse({
             functionResponses: toolCall.functionCalls.map((fc: any) => ({
               response: { error: "Failed to create email draft" },
@@ -266,34 +278,36 @@ export function EmailDraft() {
     };
   }, [client, isSignedIn]);
 
+  if (!isSignedIn) {
+    return null;
+  }
+
   return (
     <div className="email-draft">
       {error ? (
         <div className="error-message">
           {error}
-          <button onClick={() => {
-            setError(null);
-            window.location.reload();
-          }}>
+          <button onClick={() => setError(null)}>
             Dismiss
           </button>
         </div>
-      ) : !isSignedIn ? (
-        <button onClick={handleAuthClick}>Sign In with Gmail</button>
       ) : (
         <div>
-          <button onClick={handleSignoutClick}>Sign Out</button>
           <h3>Recent Drafts</h3>
-          <div className="drafts-list">
-            {drafts.map((draft) => (
-              <div key={draft.id} className="draft-item">
-                <h4>{draft.message?.payload?.headers?.find((h: any) => h.name === 'Subject')?.value || 'No Subject'}</h4>
-                <p className="draft-recipient">
-                  To: {draft.message?.payload?.headers?.find((h: any) => h.name === 'To')?.value || 'No Recipient'}
-                </p>
-              </div>
-            ))}
-          </div>
+          {loading ? (
+            <div className="loading">Loading drafts...</div>
+          ) : (
+            <div className="drafts-list">
+              {drafts.map((draft) => (
+                <div key={draft.id} className="draft-item">
+                  <h4>{draft.message?.payload?.headers?.find((h) => h.name === 'Subject')?.value || 'No Subject'}</h4>
+                  <p className="draft-recipient">
+                    To: {draft.message?.payload?.headers?.find((h) => h.name === 'To')?.value || 'No Recipient'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

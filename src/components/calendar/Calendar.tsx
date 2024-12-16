@@ -1,19 +1,29 @@
-// src/components/calendar/Calendar.tsx
 import { type FunctionDeclaration, SchemaType } from "@google/generative-ai";
 import { useEffect, useState, memo } from "react";
 import { useLiveAPIContext } from "../../contexts/LiveAPIContext";
+import { useGoogleAuth } from "../../contexts/GoogleAuthContext";
 import { ToolCall } from "../../multimodal-live-types";
 import "./calendar.scss";
 
-declare global {
-  interface Window {
-    google: any;
-  }
+// Declare the gapi type to help TypeScript understand the global object
+
+
+interface EventArgs {
+  summary: string;
+  description?: string;
+  startDateTime: string;
+  endDateTime: string;
+  isVirtual?: boolean;
+}
+
+// Define a more specific error type for API errors
+interface GoogleAPIError extends Error {
+  status?: number;
 }
 
 const declaration: FunctionDeclaration = {
   name: "book_calendar",
-  description: "Books a calendar event and displays upcoming events.",
+  description: "Books a calendar event. If isVirtual is true, includes a Google Meet link.",
   parameters: {
     type: SchemaType.OBJECT,
     properties: {
@@ -33,111 +43,60 @@ const declaration: FunctionDeclaration = {
         type: SchemaType.STRING,
         description: "End date and time in ISO format",
       },
+      isVirtual: {
+        type: SchemaType.BOOLEAN,
+        description: "If true, creates a Google Meet video conference link for this event",
+      },
     },
     required: ["summary", "startDateTime", "endDateTime"],
   },
 };
 
-interface EventArgs {
-  summary: string;
-  description?: string;
-  startDateTime: string;
-  endDateTime: string;
-}
-
 function CalendarComponent() {
   const [events, setEvents] = useState<gapi.client.calendar.Event[]>([]);
   const { client, setConfig } = useLiveAPIContext();
-  const [isSignedIn, setIsSignedIn] = useState(false);
+  const { isSignedIn } = useGoogleAuth();
   const [error, setError] = useState<string | null>(null);
-  const [tokenClient, setTokenClient] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // Load Google Identity Services Script
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    document.body.appendChild(script);
+    const initAPI = async () => {
+      try {
+        // Ensure gapi.client exists before calling init
+        if (!window.gapi?.client) {
+          await new Promise<void>((resolve, reject) => {
+            window.gapi.load('client', { 
+              callback: () => resolve(), 
+              onerror: (err) => reject(err) 
+            });
+          });
+        }
 
-    script.onload = () => {
-      loadGapiScript();
-    };
-  }, []);
+        // Initialize the client with API key
+        await window.gapi.client.init({
+          apiKey: process.env.REACT_APP_GOOGLE_API_KEY,
+        });
 
-  const loadGapiScript = () => {
-    const script = document.createElement('script');
-    script.src = 'https://apis.google.com/js/api.js';
-    script.onload = () => {
-      initializeGapiClient();
-    };
-    document.body.appendChild(script);
-  };
-
-  const initializeGapiClient = async () => {
-    try {
-      await new Promise((resolve, reject) => {
-        window.gapi.load('client', { callback: resolve, onerror: reject });
-      });
-
-      await window.gapi.client.init({
-        apiKey: process.env.REACT_APP_GOOGLE_API_KEY,
-        discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'],
-      });
-
-      // Initialize the tokenClient
-      setTokenClient(
-        window.google.accounts.oauth2.initTokenClient({
-          client_id: process.env.REACT_APP_GOOGLE_CLIENT_ID,
-          scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly',
-          callback: '', // defined later
-        })
-      );
-    } catch (err) {
-      setError('Error initializing Google Calendar API');
-      console.error('Error initializing GAPI client:', err);
-    }
-  };
-
-  const handleAuthClick = () => {
-    if (!tokenClient) {
-      setError('Authentication client not initialized');
-      return;
-    }
-
-    tokenClient.callback = async (resp: any) => {
-      if (resp.error) {
-        setError(resp.error);
-        return;
+        // Load the calendar service
+        await window.gapi.client.load('calendar', 'v3');
+        
+        listUpcomingEvents();
+      } catch (err: unknown) {
+        console.error('Error initializing API:', err);
+        setError('Error initializing calendar API');
       }
-      setIsSignedIn(true);
-      await listUpcomingEvents();
     };
 
-    if (window.gapi.client.getToken() === null) {
-      tokenClient.requestAccessToken({ prompt: 'consent' });
-    } else {
-      tokenClient.requestAccessToken({ prompt: '' });
+    if (isSignedIn) {
+      initAPI();
     }
-  };
-
-  const handleSignoutClick = () => {
-    const token = window.gapi.client.getToken();
-    if (token !== null) {
-      window.google.accounts.oauth2.revoke(token.access_token);
-      window.gapi.client.setToken(null);
-      setIsSignedIn(false);
-      setEvents([]);
-    }
-  };
+  }, [isSignedIn]);
 
   const listUpcomingEvents = async () => {
     try {
+      setLoading(true);
       const now = new Date();
-      // Set time to start of day
       now.setHours(0, 0, 0, 0);
-      
-      console.log('Fetching events from:', now.toISOString());
       
       const response = await window.gapi.client.calendar.events.list({
         calendarId: 'primary',
@@ -148,32 +107,35 @@ function CalendarComponent() {
         orderBy: 'startTime',
       });
 
-      console.log('Fetched events:', response.result.items);
       setEvents(response.result.items || []);
       
-      // If no events are returned, let's check the calendar permissions
       if (!response.result.items?.length) {
-        console.log('No events found. Checking calendar permissions...');
-        const calendarResponse = await window.gapi.client.calendar.calendars.get({
+        await window.gapi.client.calendar.calendars.get({
           calendarId: 'primary'
         });
-        console.log('Calendar permissions:', calendarResponse.result);
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error fetching events:', err);
-      if ((err as any).status === 403) {
-        setError('Calendar access denied. Please check permissions.');
+      
+      // Type guard to check if err is a GoogleAPIError
+      if (err instanceof Error) {
+        const apiError = err as GoogleAPIError;
+        if ('status' in apiError && apiError.status === 403) {
+          setError('Calendar access denied. Please check permissions.');
+        } else {
+          setError('Error fetching calendar events');
+        }
       } else {
-        setError('Error fetching calendar events');
+        setError('An unknown error occurred');
       }
+    } finally {
+      setLoading(false);
     }
   };
 
   const createEvent = async (eventDetails: EventArgs) => {
     try {
-      console.log('Creating event with details:', eventDetails);
-      
-      // Convert timestamps to user's timezone
+      setLoading(true);
       const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const startDate = new Date(eventDetails.startDateTime);
       const endDate = new Date(eventDetails.endDateTime);
@@ -189,32 +151,38 @@ function CalendarComponent() {
           dateTime: endDate.toISOString(),
           timeZone: userTimeZone,
         },
+        ...(eventDetails.isVirtual === true && {
+          conferenceData: {
+            createRequest: {
+              requestId: `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+              conferenceSolutionKey: {
+                type: 'hangoutsMeet'
+              }
+            }
+          }
+        }),
         reminders: {
           useDefault: true
         },
-        visibility: 'default'
       };
 
-      console.log('Sending event to Google Calendar with timezone:', userTimeZone);
-      console.log('Event start time in local timezone:', startDate.toLocaleString());
-      console.log('Event end time in local timezone:', endDate.toLocaleString());
-      
       const response = await window.gapi.client.calendar.events.insert({
         calendarId: 'primary',
         resource: event,
+        conferenceDataVersion: 1
       });
 
       if (response.status === 200) {
-        console.log('Event created successfully:', response.result);
-        // Give a small delay before refreshing the events list
-        setTimeout(() => listUpcomingEvents(), 1000);
+        await listUpcomingEvents();
         return response;
       } else {
         throw new Error(`Failed to create event. Status: ${response.status}`);
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error creating event:', err);
       throw err;
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -224,7 +192,7 @@ function CalendarComponent() {
       systemInstruction: {
         parts: [
           {
-            text: 'You are my helpful assistant. When I want to schedule something, use the "book_calendar" function. First ask for authentication if not signed in.',
+            text: 'You are my helpful assistant. When I want to schedule something, use the "book_calendar" function. First ask for authentication if not signed in. Only add Google Meet video conferencing when explicitly requested for virtual meetings.',
           },
         ],
       },
@@ -234,7 +202,6 @@ function CalendarComponent() {
 
   useEffect(() => {
     const onToolCall = async (toolCall: ToolCall) => {
-      console.log(`got toolcall`, toolCall);
       const fc = toolCall.functionCalls.find((fc) => fc.name === declaration.name);
       if (fc && fc.args) {
         if (!isSignedIn) {
@@ -252,11 +219,15 @@ function CalendarComponent() {
           const response = await createEvent(args);
           client.sendToolResponse({
             functionResponses: toolCall.functionCalls.map((fc) => ({
-              response: { success: true, eventId: response.result.id },
+              response: { 
+                success: true, 
+                eventId: response.result.id,
+                meetLink: response.result.conferenceData?.entryPoints?.[0]?.uri || null
+              },
               id: fc.id,
             })),
           });
-        } catch (err) {
+        } catch (err: unknown) {
           client.sendToolResponse({
             functionResponses: toolCall.functionCalls.map((fc) => ({
               response: { error: "Failed to create event" },
@@ -273,39 +244,51 @@ function CalendarComponent() {
     };
   }, [client, isSignedIn]);
 
+  if (!isSignedIn) {
+    return null;
+  }
+
   return (
     <div className="calendar-widget">
       {error ? (
         <div className="error-message">
           {error}
-          <button 
-            onClick={() => {
-              setError(null);
-              window.location.reload();
-            }}
-          >
+          <button onClick={() => setError(null)}>
             Dismiss
           </button>
         </div>
-      ) : !isSignedIn ? (
-        <button onClick={handleAuthClick}>Sign In with Google</button>
       ) : (
         <div>
-          <button onClick={handleSignoutClick}>Sign Out</button>
           <h3>Upcoming Events</h3>
-          <div className="events-list">
-            {events.map((event) => (
-              <div key={event.id || 'temp-id'} className="event-item">
-                <h4>{event.summary}</h4>
-                <p>
-                  {event.start?.dateTime ? 
-                    `${new Date(event.start.dateTime).toLocaleString()} - ${new Date(event.end?.dateTime || '').toLocaleTimeString()}`
-                    : 'No date specified'}
-                </p>
-                {event.description && <p className="event-description">{event.description}</p>}
-              </div>
-            ))}
-          </div>
+          {loading ? (
+            <div className="loading">Loading events...</div>
+          ) : (
+            <div className="events-list">
+              {events.map((event) => (
+                <div key={event.id || 'temp-id'} className="event-item">
+                  <h4>{event.summary}</h4>
+                  <p>
+                    {event.start?.dateTime ? 
+                      `${new Date(event.start.dateTime).toLocaleString()} - ${new Date(event.end?.dateTime || '').toLocaleTimeString()}`
+                      : 'No date specified'}
+                  </p>
+                  {event.description && <p className="event-description">{event.description}</p>}
+                  {event.conferenceData?.entryPoints && (
+                    <div className="meet-link">
+                      <a 
+                        href={event.conferenceData.entryPoints[0].uri} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="meet-button"
+                      >
+                        Join Meet
+                      </a>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

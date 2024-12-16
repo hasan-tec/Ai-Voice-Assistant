@@ -1,0 +1,28 @@
+// src/components/auth/google-auth.scss
+.google-auth-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 1000;
+  
+    .google-auth-button {
+      background: var(--Blue-500);
+      color: white;
+      border: none;
+      padding: 16px 32px;
+      border-radius: 8px;
+      font-size: 18px;
+      cursor: pointer;
+      transition: background 0.2s ease;
+  
+      &:hover {
+        background: var(--Blue-800);
+      }
+    }
+  }
