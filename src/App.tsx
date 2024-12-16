@@ -9,6 +9,7 @@ import ControlTray from "./components/control-tray/ControlTray";
 import { YouTubeSuggestions } from "./components/youtube/youtube";
 import cn from "classnames";
 import { GoogleSignInButton } from "./components/auth/GoogleSignInButton";
+import { Menu } from 'lucide-react';
 
 const API_KEY = process.env.REACT_APP_GEMINI_API_KEY as string;
 if (typeof API_KEY !== "string") {
@@ -22,18 +23,28 @@ const App: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
   const [activeView, setActiveView] = useState<'calendar' | 'email' | 'youtube'>('calendar');
+  const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
+
+  const toggleSidePanel = () => {
+    setIsSidePanelOpen(!isSidePanelOpen);
+  };
 
   return (
     <div className="App">
       <LiveAPIProvider url={uri} apiKey={API_KEY}>
         <GoogleAuthProvider>
           <div className="streaming-console">
-            <SidePanel />
+            <SidePanel isOpen={isSidePanelOpen} onClose={() => setIsSidePanelOpen(false)} />
             <main>
-               {/* Add GoogleSignInButton to the top of the main section */}
-               <div className="google-sign-in">
-                <GoogleSignInButton />
-              </div>
+              <header className="app-header">
+                <button className="menu-toggle" onClick={toggleSidePanel}>
+                  <Menu size={24} />
+                </button>
+                <h1>AI Assistant</h1>
+                <div className="google-sign-in">
+                  <GoogleSignInButton />
+                </div>
+              </header>
               <div className="view-toggle">
                 <button
                   onClick={() => setActiveView('calendar')}
@@ -45,7 +56,7 @@ const App: React.FC = () => {
                   onClick={() => setActiveView('email')}
                   className={cn({ active: activeView === 'email' })}
                 >
-                  Email Draft
+                  Email
                 </button>
                 <button
                   onClick={() => setActiveView('youtube')}
@@ -74,7 +85,7 @@ const App: React.FC = () => {
                 supportsVideo={true}
                 onVideoStreamChange={setVideoStream}
               >
-                {/* put your own buttons here */}
+                {/* Control buttons will be added here */}
               </ControlTray>
             </main>
           </div>
@@ -85,3 +96,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+
