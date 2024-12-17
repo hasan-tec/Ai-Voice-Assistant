@@ -20,4 +20,5 @@ export type UseMediaStreamResult = {
   stop: () => void;
   isStreaming: boolean;
   stream: MediaStream | null;
+  switchCamera?: () => Promise<MediaStream>;  // Changed return type to MediaStream
 };

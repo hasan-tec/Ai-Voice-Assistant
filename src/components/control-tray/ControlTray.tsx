@@ -13,9 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 import cn from "classnames";
-
 import { memo, ReactNode, RefObject, useEffect, useRef, useState } from "react";
 import { useLiveAPIContext } from "../../contexts/LiveAPIContext";
 import { UseMediaStreamResult } from "../../hooks/use-media-stream-mux";
@@ -40,9 +38,6 @@ type MediaStreamButtonProps = {
   stop: () => any;
 };
 
-/**
- * button used for triggering webcam or screen-capture
- */
 const MediaStreamButton = memo(
   ({ isStreaming, onIcon, offIcon, start, stop }: MediaStreamButtonProps) =>
     isStreaming ? (
@@ -63,8 +58,7 @@ function ControlTray({
   supportsVideo,
 }: ControlTrayProps) {
   const videoStreams = [useWebcam(), useScreenCapture()];
-  const [activeVideoStream, setActiveVideoStream] =
-    useState<MediaStream | null>(null);
+  const [activeVideoStream, setActiveVideoStream] = useState<MediaStream | null>(null);
   const [webcam, screenCapture] = videoStreams;
   const [inVolume, setInVolume] = useState(0);
   const [audioRecorder] = useState(() => new AudioRecorder());
@@ -72,14 +66,14 @@ function ControlTray({
   const renderCanvasRef = useRef<HTMLCanvasElement>(null);
   const connectButtonRef = useRef<HTMLButtonElement>(null);
 
-  const { client, connected, connect, disconnect, volume } =
-    useLiveAPIContext();
+  const { client, connected, connect, disconnect, volume } = useLiveAPIContext();
 
   useEffect(() => {
     if (!connected && connectButtonRef.current) {
       connectButtonRef.current.focus();
     }
   }, [connected]);
+
   useEffect(() => {
     document.documentElement.style.setProperty(
       "--volume",
@@ -142,7 +136,6 @@ function ControlTray({
     };
   }, [connected, activeVideoStream, client, videoRef]);
 
-  //handler for swapping from one video-stream to the next
   const changeStreams = (next?: UseMediaStreamResult) => async () => {
     if (next) {
       const mediaStream = await next.start();
@@ -191,6 +184,21 @@ function ControlTray({
               onIcon="videocam_off"
               offIcon="videocam"
             />
+                 {webcam.isStreaming && webcam.switchCamera && (
+              <button 
+                className="action-button"
+                onClick={() => {
+                  if (webcam.switchCamera) {
+                    webcam.switchCamera().then((stream) => {
+                      setActiveVideoStream(stream);
+                      onVideoStreamChange(stream);
+                    });
+                  }
+                }}
+              >
+                <span className="material-symbols-outlined">flip_camera_android</span>
+              </button>
+            )}
           </>
         )}
         {children}
